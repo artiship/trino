@@ -101,6 +101,7 @@
         <module>lib/trino-plugin-toolkit</module>
         <module>lib/trino-rcfile</module>
         <module>lib/trino-record-decoder</module>
+        <module>plugin/hive-udfs</module>
         <module>plugin/trino-accumulo</module>
         <module>plugin/trino-accumulo-iterators</module>
         <module>plugin/trino-atop</module>
@@ -1666,6 +1667,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration combine.children="append">
                     <fork>false</fork>
+                    <source>11</source>
+                    <target>11</target>
                 </configuration>
             </plugin>
 

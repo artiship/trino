@@ -1,0 +1,335 @@
+/*
+ * Copyright 2013-2016 Qubole
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package io.github.artiship.trino.udf;
+
+import io.airlift.slice.Slice;
+import io.airlift.units.DataSize;
+import io.airlift.units.Duration;
+import io.trino.spi.connector.ConnectorSession;
+import io.trino.spi.function.Description;
+import io.trino.spi.function.ScalarFunction;
+import io.trino.spi.function.SqlType;
+import io.trino.spi.type.StandardTypes;
+
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.MonthDay;
+import java.time.Year;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.IsoFields;
+import java.util.concurrent.TimeUnit;
+
+import static io.airlift.slice.Slices.utf8Slice;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.addFieldValueDate;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.diffDate;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.diffTimestamp;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.diffTimestampWithTimeZone;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.formatDatetime;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.timeZoneHourFromTimestampWithTimeZone;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.timeZoneMinuteFromTimestampWithTimeZone;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.toISO8601FromDate;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.toUnixTimeFromTimestampWithTimeZone;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.weekFromTimestamp;
+import static io.github.artiship.trino.udf.PrestoDateTimeFunctions.weekFromTimestampWithTimeZone;
+import static io.trino.spi.type.DateTimeEncoding.packDateTimeWithZone;
+
+public class ExtendedDateTimeFunctions
+{
+    private ExtendedDateTimeFunctions() {}
+
+    @Description("given timestamp in UTC and converts to given timezone")
+    @ScalarFunction("from_utc_timestamp")
+    @SqlType(StandardTypes.TIMESTAMP)
+    public static long fromUtcTimestamp(@SqlType(StandardTypes.TIMESTAMP) long timestamp, @SqlType(StandardTypes.VARCHAR) Slice inputZoneId)
+    {
+        ZoneId zoneId = ZoneId.of(inputZoneId.toStringUtf8(), ZoneId.SHORT_IDS);
+        long offsetTimestamp = packDateTimeWithZone(timestamp, zoneId.toString());
+        return timestamp + ((timeZoneHourFromTimestampWithTimeZone(offsetTimestamp) * 60 + timeZoneMinuteFromTimestampWithTimeZone(offsetTimestamp)) * 60) * 1000;
+    }
+
+    @Description("given timestamp (in varchar) in UTC and converts to given timezone")
+    @ScalarFunction("from_utc_timestamp")
+    @SqlType(StandardTypes.TIMESTAMP)
+    public static long fromUtcTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp, @SqlType(StandardTypes.VARCHAR) Slice inputZoneId)
+    {
+        Timestamp javaTimestamp = Timestamp.valueOf(inputTimestamp.toStringUtf8());
+        ZoneId zoneId = ZoneId.of(inputZoneId.toStringUtf8(), ZoneId.SHORT_IDS);
+        long offsetTimestamp = packDateTimeWithZone(javaTimestamp.getTime(), zoneId.toString());
+        return javaTimestamp.getTime() + ((timeZoneHourFromTimestampWithTimeZone(offsetTimestamp) * 60 + timeZoneMinuteFromTimestampWithTimeZone(offsetTimestamp)) * 60) * 1000;
+    }
+
+    @Description("given timestamp in a timezone convert it to UTC")
+    @ScalarFunction("to_utc_timestamp")
+    @SqlType(StandardTypes.TIMESTAMP)
+    public static long toUtcTimestamp(@SqlType(StandardTypes.TIMESTAMP) long timestamp, @SqlType(StandardTypes.VARCHAR) Slice inputZoneId)
+    {
+        ZoneId zoneId = ZoneId.of(inputZoneId.toStringUtf8(), ZoneId.SHORT_IDS);
+        long offsetTimestamp = packDateTimeWithZone(timestamp, zoneId.toString());
+        return timestamp - ((timeZoneHourFromTimestampWithTimeZone(offsetTimestamp) * 60 + timeZoneMinuteFromTimestampWithTimeZone(offsetTimestamp)) * 60) * 1000;
+    }
+
+    @Description("given timestamp (in varchar) in a timezone convert it to UTC")
+    @ScalarFunction("to_utc_timestamp")
+    @SqlType(StandardTypes.TIMESTAMP)
+    public static long toUtcTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp, @SqlType(StandardTypes.VARCHAR) Slice inputZoneId)
+    {
+        Timestamp javaTimestamp = Timestamp.valueOf(inputTimestamp.toStringUtf8());
+        ZoneId zoneId = ZoneId.of(inputZoneId.toStringUtf8(), ZoneId.SHORT_IDS);
+        long offsetTimestamp = packDateTimeWithZone(javaTimestamp.getTime(), zoneId.toString());
+        return javaTimestamp.getTime() - ((timeZoneHourFromTimestampWithTimeZone(offsetTimestamp) * 60 + timeZoneMinuteFromTimestampWithTimeZone(offsetTimestamp)) * 60) * 1000;
+    }
+
+    @Description("Returns the date part of the timestamp string")
+    @ScalarFunction("to_date")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice stringTimestampToDate(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        LocalDate date = LocalDate.parse(inputTimestamp.toStringUtf8(), formatter);
+        return utf8Slice(date.toString());
+    }
+
+    @Description("Returns the date part of the timestamp")
+    @ScalarFunction("to_date")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice timestampToDate(ConnectorSession session, @SqlType(StandardTypes.TIMESTAMP) long timestamp)
+    {
+        return formatDatetime(session, timestamp, utf8Slice("yyyy-MM-dd"));
+    }
+
+    @Description("Returns the date part of the timestamp with time zone")
+    @ScalarFunction("to_date")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice timestampWithTimeZoneToDate(ConnectorSession session, @SqlType(StandardTypes.TIMESTAMP_WITH_TIME_ZONE) long timestamp)
+    {
+        // Offset is added to the unix timestamp to incorporate the affect of Timezone.
+        long offset = ((timeZoneHourFromTimestampWithTimeZone(timestamp) * 60 + timeZoneMinuteFromTimestampWithTimeZone(timestamp)) * 60) * 1000;
+        return formatDatetime(session, ((long) toUnixTimeFromTimestampWithTimeZone(timestamp) * 1000) + offset, utf8Slice("yyyy-MM-dd"));
+    }
+
+    @Description("Gets current UNIX timestamp in seconds")
+    @ScalarFunction("unix_timestamp")
+    @SqlType(StandardTypes.BIGINT)
+    public static long currentUnixTimestamp(ConnectorSession session)
+    {
+        return session.getStartTime() / 1000;
+    }
+
+    @Description("Subtract number of days to the given date")
+    @ScalarFunction("date_sub")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice dateSub(@SqlType(StandardTypes.DATE) long date, @SqlType(StandardTypes.BIGINT) long value)
+    {
+        date = addFieldValueDate(utf8Slice("day"), -value, date);
+        return toISO8601FromDate(date);
+    }
+
+    @Description("Subtract number of days to the given string date")
+    @ScalarFunction("date_sub")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice stringDateSub(ConnectorSession session, @SqlType(StandardTypes.VARCHAR) Slice inputDate, @SqlType(StandardTypes.BIGINT) long value)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        LocalDate date = LocalDate.parse(inputDate.toStringUtf8(), formatter);
+        date = LocalDate.ofEpochDay(date.toEpochDay() - value);
+        return utf8Slice(date.toString());
+    }
+
+    @Description("Add number of days to the given date")
+    @ScalarFunction("date_add")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice dateAdd(@SqlType(StandardTypes.DATE) long date, @SqlType(StandardTypes.BIGINT) long value)
+    {
+        date = addFieldValueDate(utf8Slice("day"), value, date);
+        return toISO8601FromDate(date);
+    }
+
+    @Description("Add number of days to the given string date")
+    @ScalarFunction("date_add")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice StringDateAdd(@SqlType(StandardTypes.VARCHAR) Slice inputDate, @SqlType(StandardTypes.BIGINT) long value)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        LocalDate date = LocalDate.parse(inputDate.toStringUtf8(), formatter);
+        date = LocalDate.ofEpochDay(date.toEpochDay() + value);
+        return utf8Slice(date.toString());
+    }
+
+    @Description("year of the given string timestamp")
+    @ScalarFunction("year")
+    @SqlType(StandardTypes.BIGINT)
+    public static long yearFromStringTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        return Year.parse(inputTimestamp.toStringUtf8(), formatter).getValue();
+    }
+
+    @Description("month of the year of the given string timestamp")
+    @ScalarFunction("month")
+    @SqlType(StandardTypes.BIGINT)
+    public static long monthFromStringTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        return MonthDay.parse(inputTimestamp.toStringUtf8(), formatter).getMonthValue();
+    }
+
+    @Description("week of the year of the given string timestamp")
+    @ScalarFunction("weekofyear")
+    @SqlType(StandardTypes.BIGINT)
+    public static long weekOfYearFromStringTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        LocalDate date = LocalDate.parse(inputTimestamp.toStringUtf8(), formatter);
+        return date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+    }
+
+    @Description("week of the year of the given string timestamp")
+    @ScalarFunction("weekofyear")
+    @SqlType(StandardTypes.BIGINT)
+    public static long weekOfYearFromTimestamp(ConnectorSession session, @SqlType(StandardTypes.TIMESTAMP) long timestamp)
+    {
+        return weekFromTimestamp(session, timestamp);
+    }
+
+    @Description("week of the year of the given string timestamp")
+    @ScalarFunction("weekofyear")
+    @SqlType(StandardTypes.BIGINT)
+    public static long weekOfYearFromTimestampWithTimeZone(@SqlType(StandardTypes.TIMESTAMP_WITH_TIME_ZONE) long timestamp)
+    {
+        return weekFromTimestampWithTimeZone(timestamp);
+    }
+
+    @Description("day of the year of the given string timestamp")
+    @ScalarFunction(value = "day", alias = "dayofmonth")
+    @SqlType(StandardTypes.BIGINT)
+    public static long dayFromTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        return MonthDay.parse(inputTimestamp.toStringUtf8(), formatter).getDayOfMonth();
+    }
+
+    @Description("day of the year of the given string timestamp")
+    @ScalarFunction("hour")
+    @SqlType(StandardTypes.BIGINT)
+    public static long hourFromTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[yyyy-MM-dd ]HH:mm:ss[.SSS][ zzz]");
+        return LocalTime.parse(inputTimestamp.toStringUtf8(), formatter).getHour();
+    }
+
+    @Description("day of the year of the given string timestamp")
+    @ScalarFunction("minute")
+    @SqlType(StandardTypes.BIGINT)
+    public static long minuteFromTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[yyyy-MM-dd ]HH:mm:ss[.SSS][ zzz]");
+        return LocalTime.parse(inputTimestamp.toStringUtf8(), formatter).getMinute();
+    }
+
+    @Description("day of the year of the given string timestamp")
+    @ScalarFunction("second")
+    @SqlType(StandardTypes.BIGINT)
+    public static long secondFromTimestamp(@SqlType(StandardTypes.VARCHAR) Slice inputTimestamp)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[yyyy-MM-dd ]HH:mm:ss[.SSS][ zzz]");
+        return LocalTime.parse(inputTimestamp.toStringUtf8(), formatter).getSecond();
+    }
+
+    @Description("difference of the given dates (String) in days")
+    @ScalarFunction("datediff")
+    @SqlType(StandardTypes.BIGINT)
+    public static long diffStringDateInDays(@SqlType(StandardTypes.VARCHAR) Slice inputDate1, @SqlType(StandardTypes.VARCHAR) Slice inputDate2)
+    {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd[ HH:mm:ss[.SSS]][ zzz]");
+        LocalDate date1 = LocalDate.parse(inputDate1.toStringUtf8(), formatter);
+        LocalDate date2 = LocalDate.parse(inputDate2.toStringUtf8(), formatter);
+        return date1.toEpochDay() - date2.toEpochDay();
+    }
+
+    @Description("difference of the given dates in days")
+    @ScalarFunction("datediff")
+    @SqlType(StandardTypes.BIGINT)
+    public static long diffDateInDays(@SqlType(StandardTypes.DATE) long date1, @SqlType(StandardTypes.DATE) long date2)
+    {
+        return diffDate(utf8Slice("day"), date2, date1);
+    }
+
+    @Description("difference of the given dates (Timestamps) in days")
+    @ScalarFunction("datediff")
+    @SqlType(StandardTypes.BIGINT)
+    public static long diffTimestampDateInDays(ConnectorSession session, @SqlType(StandardTypes.TIMESTAMP) long timestamp1, @SqlType(StandardTypes.TIMESTAMP) long timestamp2)
+    {
+        return diffTimestamp(session, utf8Slice("day"), timestamp2, timestamp1);
+    }
+
+    @Description("difference of the given dates (Timestamps) in days")
+    @ScalarFunction("datediff")
+    @SqlType(StandardTypes.BIGINT)
+    public static long diffTimestampWithTimezoneDateInDays(@SqlType(StandardTypes.TIMESTAMP_WITH_TIME_ZONE) long timestamp1, @SqlType(StandardTypes.TIMESTAMP_WITH_TIME_ZONE) long timestamp2)
+    {
+        return diffTimestampWithTimeZone(utf8Slice("day"), timestamp2, timestamp1);
+    }
+
+    @Description("Converts the number of seconds from unix epoch to a string representing the timestamp")
+    @ScalarFunction("format_unixtimestamp")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice fromUnixtimeToStringTimestamp(@SqlType(StandardTypes.BIGINT) long epochtime)
+    {
+        LocalDateTime timestamp = LocalDateTime.ofEpochSecond(epochtime, 0, ZoneOffset.UTC);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        return utf8Slice(timestamp.format(formatter));
+    }
+
+    @Description("Converts the number of seconds from unix epoch to a string representing the timestamp according to the given format")
+    @ScalarFunction("format_unixtimestamp")
+    @SqlType(StandardTypes.VARCHAR)
+    public static Slice fromUnixtimeWithFormatToStringTimestamp(@SqlType(StandardTypes.BIGINT) long epochtime, @SqlType(StandardTypes.VARCHAR) Slice format)
+    {
+        ZonedDateTime timestamp = ZonedDateTime.of(LocalDateTime.ofEpochSecond(epochtime, 0, ZoneOffset.UTC), ZoneId.of("UTC"));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(format.toStringUtf8());
+        return utf8Slice(timestamp.format(formatter));
+    }
+
+    @Description("Converts a string representing time duration in airlift's Duration format to a double representing time in the specified time unit")
+    @ScalarFunction("from_duration")
+    @SqlType(StandardTypes.DOUBLE)
+    public static double fromDuration(@SqlType(StandardTypes.VARCHAR) Slice duration, @SqlType(StandardTypes.VARCHAR) Slice timeUnitString)
+    {
+        Duration timeDuration = Duration.valueOf(duration.toStringUtf8());
+        TimeUnit timeUnit = Duration.valueOfTimeUnit(timeUnitString.toStringUtf8());
+        return timeDuration.getValue(timeUnit);
+    }
+
+    @Description("Converts a string representing data size in airlift's DataSize format to a double representing size in the specified size unit")
+    @ScalarFunction("from_datasize")
+    @SqlType(StandardTypes.DOUBLE)
+    public static double fromDataSize(@SqlType(StandardTypes.VARCHAR) Slice size, @SqlType(StandardTypes.VARCHAR) Slice sizeUnit)
+    {
+        String sizeUnitString = sizeUnit.toStringUtf8();
+        DataSize dataSize = DataSize.valueOf(size.toStringUtf8());
+        for (DataSize.Unit unit : DataSize.Unit.values()) {
+            if (unit.getUnitString().equals(sizeUnitString)) {
+                return dataSize.getValue(unit);
+            }
+        }
+        throw new IllegalArgumentException("Unknown unit: " + sizeUnitString);
+    }
+}
