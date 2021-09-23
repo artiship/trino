@@ -17,14 +17,7 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.UncheckedExecutionException;
-import io.trino.spi.type.ParametricType;
-import io.trino.spi.type.Type;
-import io.trino.spi.type.TypeId;
-import io.trino.spi.type.TypeManager;
-import io.trino.spi.type.TypeNotFoundException;
-import io.trino.spi.type.TypeParameter;
-import io.trino.spi.type.TypeSignature;
-import io.trino.spi.type.TypeSignatureParameter;
+import io.trino.spi.type.*;
 import io.trino.sql.analyzer.FeaturesConfig;
 import io.trino.sql.parser.SqlParser;
 import io.trino.type.CharParametricType;
@@ -33,7 +26,6 @@ import io.trino.type.Re2JRegexpType;
 import io.trino.type.VarcharParametricType;
 
 import javax.annotation.concurrent.ThreadSafe;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -123,6 +115,7 @@ final class TypeRegistry
         addType(UUID);
         addType(TDIGEST);
         addParametricType(VarcharParametricType.VARCHAR);
+        addParametricType(StandardTypes.STRING, VarcharParametricType.VARCHAR);
         addParametricType(CharParametricType.CHAR);
         addParametricType(DecimalParametricType.DECIMAL);
         addParametricType(ROW);
@@ -222,6 +215,11 @@ final class TypeRegistry
     public void addParametricType(ParametricType parametricType)
     {
         String name = parametricType.getName().toLowerCase(Locale.ENGLISH);
+        addParametricType(name, parametricType);
+    }
+
+    public void addParametricType(String name, ParametricType parametricType)
+    {
         checkArgument(!parametricTypes.containsKey(name), "Parametric type already registered: %s", name);
         parametricTypes.putIfAbsent(name, parametricType);
     }
