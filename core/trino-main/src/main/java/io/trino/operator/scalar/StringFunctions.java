@@ -332,7 +332,7 @@ public final class StringFunctions
             return Slices.EMPTY_SLICE;
         }
 
-        if (start == 0 ) {
+        if (start == 0) {
             start = 1;
         }
 
