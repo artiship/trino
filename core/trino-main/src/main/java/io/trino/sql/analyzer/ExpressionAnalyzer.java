@@ -2237,7 +2237,13 @@ public class ExpressionAnalyzer
                 operatorSignature = metadata.resolveOperator(operatorType, argumentTypes.build()).getSignature();
             }
             catch (OperatorNotFoundException e) {
-                throw semanticException(TYPE_MISMATCH, node, e, "%s", e.getMessage());
+                final ImmutableList<Type> types = argumentTypes.build();
+                try {
+                    operatorSignature = coerceTypeToDouble(operatorType, types, arguments);
+                }
+                catch (Exception e1) {
+                    throw semanticException(TYPE_MISMATCH, node, e, "%s", e.getMessage());
+                }
             }
 
             for (int i = 0; i < arguments.length; i++) {
@@ -2248,6 +2254,15 @@ public class ExpressionAnalyzer
 
             Type type = operatorSignature.getReturnType();
             return setExpressionType(node, type);
+        }
+
+        private BoundSignature coerceTypeToDouble(OperatorType operatorType, ImmutableList<Type> types, Expression[] arguments) {
+            ImmutableList.Builder<Type> coerceTypes = ImmutableList.builder();
+            for (int i = 0; i < arguments.length; i++) {
+                addOrReplaceExpressionCoercion(arguments[i], types.get(i), DOUBLE);
+                coerceTypes.add(setExpressionType(arguments[i], DOUBLE));
+            }
+            return metadata.resolveOperator(operatorType, coerceTypes.build()).getSignature();
         }
 
         private void coerceType(Expression expression, Type actualType, Type expectedType, String message)
