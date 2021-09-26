@@ -19,6 +19,7 @@ import io.airlift.slice.Slice;
 import io.trino.spi.TrinoException;
 import io.trino.spi.function.LiteralParameters;
 import io.trino.spi.function.ScalarOperator;
+import io.trino.spi.function.SqlNullable;
 import io.trino.spi.function.SqlType;
 import io.trino.spi.type.StandardTypes;
 
@@ -77,15 +78,14 @@ public final class IntegerOperators
     }
 
     @ScalarOperator(DIVIDE)
-    @SqlType(StandardTypes.INTEGER)
-    public static long divide(@SqlType(StandardTypes.INTEGER) long left, @SqlType(StandardTypes.INTEGER) long right)
+    @SqlType(StandardTypes.DOUBLE)
+    @SqlNullable
+    public static Double divide(@SqlType(StandardTypes.INTEGER) long left, @SqlType(StandardTypes.INTEGER) long right)
     {
-        try {
-            return left / right;
+        if (right == 0) {
+            return null;
         }
-        catch (ArithmeticException e) {
-            throw new TrinoException(DIVISION_BY_ZERO, "Division by zero", e);
-        }
+        return (double) left / right;
     }
 
     @ScalarOperator(MODULUS)
